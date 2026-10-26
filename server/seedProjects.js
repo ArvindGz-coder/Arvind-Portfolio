@@ -16,7 +16,7 @@ const projects = [
       "MongoDB",
       "Gemini AI",
     ],
-    github: "#",
+    github: "https://github.com/ArvindGz-coder/CareerGenie",
     demo: "#",
     featured: true,
   },

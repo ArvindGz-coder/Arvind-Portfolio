@@ -12,38 +12,49 @@ const createContact = async (req, res) => {
       });
     }
 
-    // Save message to MongoDB
-    const contact = await Contact.create({
-      name,
-      email,
-      message,
-      status: "new",
-    });
+    let contact = null;
+    // Attempt to save message to MongoDB if available
+    try {
+      contact = await Contact.create({
+        name,
+        email,
+        message,
+        status: "new",
+      });
+    } catch (dbError) {
+      console.warn("MongoDB write skipped or failed:", dbError.message);
+    }
 
-    // Send email notification
+    // Send email notification to Arvind Gupta
     try {
       await sendContactEmail({
         name,
         email,
         message,
       });
+
+      return res.status(201).json({
+        success: true,
+        message: "Message sent and delivered to Arvind's inbox successfully!",
+        data: contact || { name, email, message },
+      });
     } catch (emailError) {
       console.error("Email sending failed:", emailError.message);
 
-      // Message is still safely stored in MongoDB
-      return res.status(201).json({
-        success: true,
-        message:
-          "Message received, but email notification could not be sent.",
-        data: contact,
+      if (contact) {
+        return res.status(201).json({
+          success: true,
+          message: "Message received and stored in database.",
+          data: contact,
+        });
+      }
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send email notification.",
+        error: emailError.message,
       });
     }
-
-    return res.status(201).json({
-      success: true,
-      message: "Message sent successfully",
-      data: contact,
-    });
   } catch (error) {
     console.error("Create contact error:", error);
 

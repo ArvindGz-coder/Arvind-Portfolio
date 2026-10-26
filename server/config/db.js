@@ -4,8 +4,8 @@ const connectDB = async () => {
     const connection = await mongoose.connect(process.env.MONGODB_URI);
     console.log(`MongoDB connected: ${connection.connection.host}`);
   } catch (error) {
-    console.error(`MongoDB connection failed:",${error.message}`);
-    process.exit(1);
+    console.error(`MongoDB connection failed: ${error.message}`);
+    console.log("Server will continue running so email services remain active.");
   }
 };
 

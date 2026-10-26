@@ -1,54 +1,60 @@
 import { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
   Pencil,
   Trash2,
-  X,
-  Save,
   ExternalLink,
-//   Github,
+  Star,
+  Search,
+  Filter,
+  Layers,
+  Sparkles,
+  AlertTriangle,
+  RefreshCw,
+  Eye,
+  CheckCircle2,
 } from "lucide-react";
+import { GithubIcon } from "../../components/ui/Icons";
 import adminApi from "../../services/adminApi";
+import ProjectDrawer from "./ProjectDrawer";
 
-function ProjectsManager() {
+const CATEGORIES = ["All", "Full Stack", "Frontend", "Backend", "Other"];
+
+export default function ProjectsManager({
+  onRefreshStats,
+  standalone = false,
+  onNavigateHome,
+}) {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState(null);
+  const [successToast, setSuccessToast] = useState("");
 
-  const emptyForm = {
-    number: "",
-    title: "",
-    description: "",
-    technologies: "",
-    github: "",
-    demo: "",
-    featured: false,
-    image: "",
-  };
+  // Drawer state
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState(null);
 
-  const [formData, setFormData] = useState(emptyForm);
+  // Filter & Search
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [filterFeaturedOnly, setFilterFeaturedOnly] = useState(false);
 
-  // Fetch projects
+  // Delete modal confirmation
+  const [projectToDelete, setProjectToDelete] = useState(null);
+
   const fetchProjects = async () => {
     try {
       setLoading(true);
       setError("");
-
       const response = await adminApi.get("/projects");
-
       if (response.data.success) {
         setProjects(response.data.data);
       }
-    } catch (error) {
-      console.error("Fetch projects error:", error);
-
-      setError(
-        error.response?.data?.message ||
-          "Failed to load projects."
-      );
+    } catch (err) {
+      console.error("Fetch projects error:", err);
+      setError(err.response?.data?.message || "Failed to load projects.");
     } finally {
       setLoading(false);
     }
@@ -58,475 +64,453 @@ function ProjectsManager() {
     fetchProjects();
   }, []);
 
-  // Handle form changes
-  const handleChange = (event) => {
-    const { name, value, type, checked } = event.target;
-
-    setFormData((previous) => ({
-      ...previous,
-      [name]: type === "checkbox" ? checked : value,
-    }));
+  const triggerToast = (msg) => {
+    setSuccessToast(msg);
+    setTimeout(() => setSuccessToast(""), 3500);
   };
 
-  // Open add form
-  const handleAdd = () => {
-    setEditingId(null);
-    setFormData(emptyForm);
-    setShowForm(true);
+  // Open Add Drawer
+  const handleOpenAdd = () => {
+    setEditingProject(null);
+    setDrawerOpen(true);
     setError("");
   };
 
-  // Open edit form
-  const handleEdit = (project) => {
-    setEditingId(project._id);
-
-    setFormData({
-      number: project.number || "",
-      title: project.title || "",
-      description: project.description || "",
-      technologies: Array.isArray(project.technologies)
-        ? project.technologies.join(", ")
-        : "",
-      github: project.github || "",
-      demo: project.demo || "",
-      featured: project.featured || false,
-      image: project.image || "",
-    });
-
-    setShowForm(true);
+  // Open Edit Drawer
+  const handleOpenEdit = (project) => {
+    setEditingProject(project);
+    setDrawerOpen(true);
     setError("");
   };
 
-  // Submit
-  const handleSubmit = async (event) => {
-    event.preventDefault();
+  // Quick toggle featured status
+  const handleToggleFeatured = async (project, e) => {
+    e.stopPropagation();
+    try {
+      const updatedFeatured = !project.featured;
+      const res = await adminApi.put(`/projects/${project._id}`, {
+        featured: updatedFeatured,
+      });
+      if (res.data.success) {
+        setProjects((prev) =>
+          prev.map((p) =>
+            p._id === project._id ? { ...p, featured: updatedFeatured } : p
+          )
+        );
+        triggerToast(
+          updatedFeatured
+            ? `★ Pinned "${project.title}" to Featured showcase`
+            : `Unpinned "${project.title}" from Featured`
+        );
+        if (onRefreshStats) onRefreshStats();
+      }
+    } catch (err) {
+      console.error("Failed to toggle featured:", err);
+    }
+  };
 
+  // Save Project from Drawer
+  const handleSaveProject = async (formData) => {
     setSaving(true);
     setError("");
 
     const payload = {
-      number: formData.number,
-      title: formData.title,
-      description: formData.description,
+      number: Number(formData.number) || 1,
+      title: formData.title.trim(),
+      description: formData.description.trim(),
       technologies: formData.technologies
-        .split(",")
-        .map((tech) => tech.trim())
-        .filter(Boolean),
-      github: formData.github,
-      demo: formData.demo,
-      featured: formData.featured,
-      image: formData.image,
+        ? formData.technologies
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean)
+        : [],
+      category: formData.category,
+      github: formData.github.trim(),
+      demo: formData.demo.trim(),
+      featured: Boolean(formData.featured),
+      image: formData.image.trim(),
     };
 
     try {
-      if (editingId) {
-        await adminApi.put(
-          `/projects/${editingId}`,
-          payload
-        );
+      if (editingProject) {
+        await adminApi.put(`/projects/${editingProject._id}`, payload);
+        triggerToast(`Updated project "${payload.title}" successfully.`);
       } else {
         await adminApi.post("/projects", payload);
+        triggerToast(`Deployed new project "${payload.title}" to database.`);
       }
 
-      setFormData(emptyForm);
-      setEditingId(null);
-      setShowForm(false);
-
+      setDrawerOpen(false);
+      setEditingProject(null);
       await fetchProjects();
-    } catch (error) {
-      console.error("Save project error:", error);
-
-      setError(
-        error.response?.data?.message ||
-          "Failed to save project."
-      );
+      if (onRefreshStats) onRefreshStats();
+    } catch (err) {
+      console.error("Save project error:", err);
+      setError(err.response?.data?.message || "Failed to save project.");
     } finally {
       setSaving(false);
     }
   };
 
-  // Delete
-  const handleDelete = async (id) => {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this project?"
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
+  // Delete Project
+  const confirmDelete = async () => {
+    if (!projectToDelete) return;
     try {
-      setError("");
-
-      await adminApi.delete(`/projects/${id}`);
-
-      await fetchProjects();
-    } catch (error) {
-      console.error("Delete project error:", error);
-
-      setError(
-        error.response?.data?.message ||
-          "Failed to delete project."
-      );
+      await adminApi.delete(`/projects/${projectToDelete._id}`);
+      triggerToast(`Deleted "${projectToDelete.title}" from catalog.`);
+      setProjects((prev) => prev.filter((p) => p._id !== projectToDelete._id));
+      setProjectToDelete(null);
+      if (onRefreshStats) onRefreshStats();
+    } catch (err) {
+      console.error("Delete error:", err);
+      setError(err.response?.data?.message || "Failed to delete project.");
     }
   };
 
+  // Filtered list
+  const filteredProjects = projects.filter((p) => {
+    const matchesCategory =
+      selectedCategory === "All" || p.category === selectedCategory;
+    const matchesFeatured = !filterFeaturedOnly || p.featured;
+    const matchesSearch =
+      searchQuery.trim() === "" ||
+      p.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (Array.isArray(p.technologies) &&
+        p.technologies.some((t) =>
+          t.toLowerCase().includes(searchQuery.toLowerCase())
+        ));
+
+    return matchesCategory && matchesFeatured && matchesSearch;
+  });
+
   return (
-    <div className="min-h-screen bg-black px-6 py-10 text-white">
-      <div className="mx-auto max-w-7xl">
+    <div className="space-y-6">
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {successToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className="fixed top-6 right-6 z-50 flex items-center gap-2.5 rounded-2xl border border-emerald-500/40 bg-slate-950/95 px-5 py-3.5 text-sm font-mono text-emerald-300 shadow-[0_0_30px_rgba(16,185,129,0.3)] backdrop-blur-2xl"
+          >
+            <CheckCircle2 size={18} className="text-emerald-400" />
+            <span>{successToast}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-        {/* Header */}
-        <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-white/30">
-              Admin
-            </p>
-
-            <h1 className="mt-2 text-3xl font-bold">
-              Projects
-            </h1>
-
-            <p className="mt-2 text-sm text-white/40">
-              Manage the projects displayed on your portfolio.
+      {/* Control Bar: Title & Primary CTA */}
+      <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-800/80 bg-slate-900/40 p-6 backdrop-blur-xl shadow-2xl sm:flex-row sm:items-center">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="flex h-2 w-2 rounded-full bg-violet-400 animate-pulse" />
+            <p className="text-xs font-mono uppercase tracking-widest text-violet-400">
+              CRUD MAIN HUB
             </p>
           </div>
-
-          <button
-            onClick={handleAdd}
-            className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-semibold !text-black transition hover:bg-white/90"
-          >
-            <Plus size={17} />
-            Add Project
-          </button>
+          <h2 className="mt-1 text-2xl font-bold font-heading text-white">
+            Projects & Showcase Manager
+          </h2>
+          <p className="mt-1 text-xs text-slate-400">
+            Create, calibrate, toggle visibility, and update your portfolio engineering artifacts.
+          </p>
         </div>
 
-        {/* Error */}
-        {error && (
-          <div className="mt-6 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-            {error}
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={fetchProjects}
+            title="Refresh database records"
+            className="rounded-xl border border-slate-800 bg-slate-950 p-2.5 text-slate-400 transition hover:border-slate-700 hover:text-white"
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+          </button>
 
-        {/* Form */}
-        {showForm && (
-          <div className="mt-8 rounded-3xl border border-white/10 bg-white/[0.03] p-6 sm:p-8">
+          <button
+            onClick={handleOpenAdd}
+            className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 px-5 py-2.5 text-xs font-bold font-mono text-white shadow-[0_0_25px_rgba(6,182,212,0.3)] transition hover:from-cyan-400 hover:to-violet-500"
+          >
+            <Plus size={16} />
+            + Deploy New Project
+          </button>
+        </div>
+      </div>
 
-            <div className="mb-6 flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold">
-                  {editingId ? "Edit Project" : "Add Project"}
-                </h2>
+      {/* Filter & Search Bar */}
+      <div className="flex flex-col gap-4 rounded-2xl border border-slate-800/80 bg-slate-900/40 p-4 backdrop-blur-xl md:flex-row md:items-center md:justify-between">
+        {/* Search */}
+        <div className="relative flex-1">
+          <Search
+            size={16}
+            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500"
+          />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search projects by title, stack, or architecture keyword..."
+            className="w-full rounded-xl border border-slate-800 bg-slate-950/70 py-2 pl-10 pr-4 text-xs font-sans text-white placeholder-slate-500 outline-none transition focus:border-cyan-500/50"
+          />
+        </div>
 
-                <p className="mt-1 text-sm text-white/40">
-                  Fill in the project details below.
-                </p>
-              </div>
+        {/* Category Pills & Featured Filter */}
+        <div className="flex flex-wrap items-center gap-2">
+          {CATEGORIES.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setSelectedCategory(cat)}
+              className={`rounded-xl px-3 py-1.5 text-xs font-mono transition-all ${
+                selectedCategory === cat
+                  ? "border border-cyan-500/40 bg-cyan-500/20 text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.15)]"
+                  : "border border-slate-800 bg-slate-950/50 text-slate-400 hover:text-white"
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
 
-              <button
-                type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  setEditingId(null);
-                  setFormData(emptyForm);
-                }}
-                className="rounded-full p-2 text-white/40 transition hover:bg-white/10 hover:text-white"
-              >
-                <X size={20} />
-              </button>
-            </div>
+          <button
+            onClick={() => setFilterFeaturedOnly(!filterFeaturedOnly)}
+            className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-mono transition-all ${
+              filterFeaturedOnly
+                ? "border border-amber-500/40 bg-amber-500/20 text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.2)]"
+                : "border border-slate-800 bg-slate-950/50 text-slate-400 hover:text-white"
+            }`}
+          >
+            <Star size={13} className={filterFeaturedOnly ? "fill-amber-400 text-amber-400" : ""} />
+            Featured Only
+          </button>
+        </div>
+      </div>
 
-            <form onSubmit={handleSubmit}>
-
-              <div className="grid gap-5 sm:grid-cols-2">
-
-                {/* Number */}
-                <div>
-                  <label className="mb-2 block text-sm text-white/50">
-                    Project Number *
-                  </label>
-
-                  <input
-                    name="number"
-                    value={formData.number}
-                    onChange={handleChange}
-                    required
-                    placeholder="01"
-                    className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none focus:border-white/30"
+      {/* Projects Grid */}
+      {loading ? (
+        <div className="flex h-64 flex-col items-center justify-center rounded-2xl border border-slate-800 bg-slate-900/40">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
+          <p className="mt-3 font-mono text-xs text-slate-400">
+            Querying MongoDB projects collection...
+          </p>
+        </div>
+      ) : filteredProjects.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-800 bg-slate-900/20 py-16 text-center">
+          <Layers size={40} className="text-slate-600 mb-3" />
+          <h3 className="font-heading text-lg font-bold text-white">
+            No matching projects found
+          </h3>
+          <p className="mt-1 text-xs text-slate-400 max-w-sm">
+            {searchQuery
+              ? `No artifacts matching query "${searchQuery}". Try clearing filters.`
+              : "No project entries exist in your database yet. Deploy your first build now!"}
+          </p>
+          <button
+            onClick={handleOpenAdd}
+            className="mt-4 flex items-center gap-2 rounded-xl bg-cyan-500/20 border border-cyan-500/40 px-4 py-2 text-xs font-mono text-cyan-300 hover:bg-cyan-500/30 transition"
+          >
+            <Plus size={14} /> Add First Project
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {filteredProjects.map((project, index) => (
+            <motion.div
+              key={project._id}
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25, delay: index * 0.04 }}
+              className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/40 backdrop-blur-xl shadow-xl transition-all duration-300 hover:border-cyan-500/40 hover:shadow-[0_0_30px_rgba(6,182,212,0.15)]"
+            >
+              {/* Project Card Header Image */}
+              <div className="relative h-44 w-full overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950">
+                {project.image ? (
+                  <img
+                    src={project.image}
+                    alt={project.title}
+                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    onError={(e) => {
+                      e.target.style.display = "none";
+                    }}
                   />
+                ) : (
+                  <div className="flex h-full w-full flex-col items-center justify-center text-slate-600">
+                    <Layers size={32} className="opacity-40 mb-1" />
+                    <span className="font-mono text-xs">#{project.number}</span>
+                  </div>
+                )}
+
+                {/* Overlaid Badges */}
+                <div className="absolute top-3 left-3 flex items-center gap-2">
+                  <span className="rounded-lg bg-black/70 px-2.5 py-1 text-[11px] font-mono text-cyan-400 backdrop-blur-md border border-cyan-500/30">
+                    #{project.number} • {project.category}
+                  </span>
                 </div>
 
-                {/* Title */}
-                <div>
-                  <label className="mb-2 block text-sm text-white/50">
-                    Title *
-                  </label>
-
-                  <input
-                    name="title"
-                    value={formData.title}
-                    onChange={handleChange}
-                    required
-                    placeholder="CareerGenie"
-                    className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none focus:border-white/30"
-                  />
-                </div>
-
-              </div>
-
-              {/* Description */}
-              <div className="mt-5">
-                <label className="mb-2 block text-sm text-white/50">
-                  Description *
-                </label>
-
-                <textarea
-                  name="description"
-                  value={formData.description}
-                  onChange={handleChange}
-                  required
-                  rows="4"
-                  placeholder="Describe your project..."
-                  className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none focus:border-white/30"
-                />
-              </div>
-
-              {/* Technologies */}
-              <div className="mt-5">
-                <label className="mb-2 block text-sm text-white/50">
-                  Technologies
-                </label>
-
-                <input
-                  name="technologies"
-                  value={formData.technologies}
-                  onChange={handleChange}
-                  placeholder="React, Node.js, MongoDB, Tailwind CSS"
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none focus:border-white/30"
-                />
-
-                <p className="mt-2 text-xs text-white/25">
-                  Separate technologies with commas.
-                </p>
-              </div>
-
-              {/* URLs */}
-              <div className="mt-5 grid gap-5 sm:grid-cols-2">
-
-                <div>
-                  <label className="mb-2 block text-sm text-white/50">
-                    GitHub URL
-                  </label>
-
-                  <input
-                    name="github"
-                    value={formData.github}
-                    onChange={handleChange}
-                    type="url"
-                    placeholder="https://github.com/..."
-                    className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none focus:border-white/30"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-2 block text-sm text-white/50">
-                    Live Demo URL
-                  </label>
-
-                  <input
-                    name="demo"
-                    value={formData.demo}
-                    onChange={handleChange}
-                    type="url"
-                    placeholder="https://..."
-                    className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none focus:border-white/30"
-                  />
-                </div>
-
-              </div>
-
-              {/* Image */}
-              <div className="mt-5">
-                <label className="mb-2 block text-sm text-white/50">
-                  Image URL
-                </label>
-
-                <input
-                  name="image"
-                  value={formData.image}
-                  onChange={handleChange}
-                  type="url"
-                  placeholder="https://..."
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none focus:border-white/30"
-                />
-              </div>
-
-              {/* Featured */}
-              <label className="mt-5 flex cursor-pointer items-center gap-3">
-                <input
-                  type="checkbox"
-                  name="featured"
-                  checked={formData.featured}
-                  onChange={handleChange}
-                  className="h-4 w-4"
-                />
-
-                <span className="text-sm text-white/60">
-                  Featured project
-                </span>
-              </label>
-
-              {/* Buttons */}
-              <div className="mt-7 flex gap-3">
-
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-semibold !text-black disabled:opacity-50"
-                >
-                  <Save size={16} />
-
-                  {saving
-                    ? "Saving..."
-                    : editingId
-                    ? "Update Project"
-                    : "Create Project"}
-                </button>
-
+                {/* Featured Star Toggle Button */}
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    setEditingId(null);
-                    setFormData(emptyForm);
-                  }}
-                  className="rounded-full border border-white/10 px-5 py-3 text-sm text-white/60 transition hover:border-white/30 hover:text-white"
+                  onClick={(e) => handleToggleFeatured(project, e)}
+                  title={project.featured ? "Featured Project" : "Click to Pin as Featured"}
+                  className={`absolute top-3 right-3 flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-mono font-bold transition-all backdrop-blur-md ${
+                    project.featured
+                      ? "border border-amber-500/50 bg-amber-500/30 text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.3)]"
+                      : "border border-slate-700 bg-black/60 text-slate-400 hover:text-amber-400"
+                  }`}
+                >
+                  <Star
+                    size={12}
+                    className={project.featured ? "fill-amber-400 text-amber-400" : ""}
+                  />
+                  {project.featured ? "FEATURED" : "PIN"}
+                </button>
+              </div>
+
+              {/* Card Body */}
+              <div className="flex flex-1 flex-col justify-between p-5">
+                <div>
+                  <h3 className="text-base font-bold font-heading text-white group-hover:text-cyan-300 transition-colors">
+                    {project.title}
+                  </h3>
+
+                  <p className="mt-2 text-xs text-slate-400 leading-relaxed line-clamp-3">
+                    {project.description}
+                  </p>
+
+                  {/* Tech stack pills */}
+                  <div className="mt-4 flex flex-wrap gap-1.5">
+                    {Array.isArray(project.technologies) &&
+                      project.technologies.slice(0, 4).map((tech, i) => (
+                        <span
+                          key={i}
+                          className="rounded-md border border-slate-800 bg-slate-950/60 px-2 py-0.5 text-[10px] font-mono text-cyan-300"
+                        >
+                          {tech}
+                        </span>
+                      ))}
+                    {Array.isArray(project.technologies) &&
+                      project.technologies.length > 4 && (
+                        <span className="rounded-md border border-slate-800 bg-slate-950/60 px-2 py-0.5 text-[10px] font-mono text-slate-500">
+                          +{project.technologies.length - 4} more
+                        </span>
+                      )}
+                  </div>
+                </div>
+
+                {/* Action Footer Bar */}
+                <div className="mt-5 flex items-center justify-between border-t border-slate-800/80 pt-4">
+                  {/* External Links */}
+                  <div className="flex items-center gap-3">
+                    {project.demo && (
+                      <a
+                        href={project.demo}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open Live Preview"
+                        className="flex items-center gap-1 text-xs font-mono text-cyan-400 transition hover:underline"
+                      >
+                        <ExternalLink size={13} /> Demo
+                      </a>
+                    )}
+                    {project.github && (
+                      <a
+                        href={project.github}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open Source Code"
+                        className="flex items-center gap-1 text-xs font-mono text-slate-400 transition hover:text-white"
+                      >
+                        <GithubIcon size={13} /> Repo
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Edit & Delete Action Triggers */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleOpenEdit(project)}
+                      title="Edit Project"
+                      className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-cyan-400"
+                    >
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      onClick={() => setProjectToDelete(project)}
+                      title="Delete Project"
+                      className="rounded-lg p-2 text-slate-400 transition hover:bg-red-500/20 hover:text-red-400"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
+
+      {/* Slide-in Project Drawer */}
+      <ProjectDrawer
+        isOpen={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        onSave={handleSaveProject}
+        editingProject={editingProject}
+        saving={saving}
+        error={error}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {projectToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setProjectToDelete(null)}
+              className="fixed inset-0 bg-black/75 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative z-10 w-full max-w-md rounded-2xl border border-red-500/40 bg-slate-950 p-6 shadow-[0_0_50px_rgba(239,68,68,0.25)] backdrop-blur-2xl"
+            >
+              <div className="flex items-center gap-3 text-red-400">
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-2.5">
+                  <AlertTriangle size={20} />
+                </div>
+                <h3 className="text-lg font-bold font-heading text-white">
+                  Decommission Project?
+                </h3>
+              </div>
+
+              <p className="mt-3 text-sm text-slate-300">
+                Are you sure you want to delete{" "}
+                <span className="font-bold text-white">
+                  "{projectToDelete.title}"
+                </span>
+                ? This action drops the document from your MongoDB cluster permanently.
+              </p>
+
+              <div className="mt-6 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setProjectToDelete(null)}
+                  className="rounded-xl border border-slate-800 px-4 py-2 text-xs font-mono text-slate-400 hover:bg-slate-900 hover:text-white"
                 >
                   Cancel
                 </button>
-
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  className="rounded-xl bg-red-600 px-4 py-2 text-xs font-mono font-bold text-white shadow-[0_0_20px_rgba(239,68,68,0.3)] hover:bg-red-500"
+                >
+                  Confirm Delete
+                </button>
               </div>
-            </form>
+            </motion.div>
           </div>
         )}
-
-        {/* Projects */}
-        <div className="mt-8">
-
-          {loading ? (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-10 text-center text-white/40">
-              Loading projects...
-            </div>
-          ) : projects.length === 0 ? (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-10 text-center">
-              <p className="text-white/40">
-                No projects found.
-              </p>
-
-              <button
-                onClick={handleAdd}
-                className="mt-4 text-sm text-white underline underline-offset-4"
-              >
-                Add your first project
-              </button>
-            </div>
-          ) : (
-            <div className="grid gap-5">
-
-              {projects.map((project) => (
-                <div
-                  key={project._id}
-                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-5"
-                >
-                  <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-
-                    <div className="flex gap-4">
-
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/5 text-sm font-semibold text-white/50">
-                        {project.number}
-                      </div>
-
-                      <div>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <h3 className="font-semibold">
-                            {project.title}
-                          </h3>
-
-                          {project.featured && (
-                            <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-white/50">
-                              Featured
-                            </span>
-                          )}
-                        </div>
-
-                        <p className="mt-2 max-w-3xl text-sm leading-6 text-white/40">
-                          {project.description}
-                        </p>
-
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {project.technologies?.map(
-                            (technology) => (
-                              <span
-                                key={technology}
-                                className="rounded-full border border-white/10 px-2.5 py-1 text-xs text-white/40"
-                              >
-                                {technology}
-                              </span>
-                            )
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex shrink-0 items-center gap-2">
-
-                      {project.github && (
-                        <a
-                          href={project.github}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-full border border-white/10 p-2.5 text-white/40 transition hover:text-white"
-                        >
-                          <span className="text-xs font-bold">GH</span>
-                        </a>
-                      )}
-
-                      {project.demo && (
-                        <a
-                          href={project.demo}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-full border border-white/10 p-2.5 text-white/40 transition hover:text-white"
-                        >
-                          <ExternalLink size={17} />
-                        </a>
-                      )}
-
-                      <button
-                        onClick={() => handleEdit(project)}
-                        className="rounded-full border border-white/10 p-2.5 text-white/40 transition hover:text-white"
-                      >
-                        <Pencil size={17} />
-                      </button>
-
-                      <button
-                        onClick={() => handleDelete(project._id)}
-                        className="rounded-full border border-red-500/20 p-2.5 text-red-400 transition hover:bg-red-500/10"
-                      >
-                        <Trash2 size={17} />
-                      </button>
-
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-            </div>
-          )}
-
-        </div>
-      </div>
+      </AnimatePresence>
     </div>
   );
 }
-
-export default ProjectsManager;
